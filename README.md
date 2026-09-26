@@ -14,7 +14,7 @@
 | 指标 | 来源 | 更新频率 | 备注 |
 |---|---|---|---|
 | QQQ / Nasdaq-100 Trailing PE | Robinhood（日度 headline）＋ worldperatio（10 年百分位） | 日度 | 双口径已注明，不可跨口径比较绝对值 |
-| QQQ / Nasdaq-100 Forward PE | Siblis Research | 月度 | 无免费长期历史，自建存档，满 24 个月启用百分位 |
+| QQQ / Nasdaq-100 Forward PE | Siblis Research | 月度 | 无免费长期历史，自建存档，满 12 个月启用百分位 |
 | S&P 500 信息技术板块 Forward PE | Siblis Research | 月度 | 半导体前瞻估值的近似替代（SOXX 无稳定免费 forward 源）；自建存档 |
 | S&P 500 Trailing PE | worldperatio | 月度 | 单一口径，10 年百分位 |
 | SOXX Trailing P/E | Robinhood | 日度 | 日度口径；自 2026-09 起按月自建存档（旧 iShares 口径已作废） |

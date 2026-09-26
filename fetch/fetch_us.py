@@ -224,21 +224,34 @@ def fetch_cnn_fear_greed():
 
 
 def fetch_robinhood_pe(symbols=("QQQ", "SOXX", "SMH")):
-    """Robinhood fundamentals：日度 trailing P/E 快照，免 key。
+    """Robinhood fundamentals：日度 trailing P/E 快照 + 52 周高低，免 key。
 
-    返回 {symbol: (pe_float, market_date_str)}，market_date 为交易所日期。
+    返回 {symbol: {"pe": float, "date": str, "high_52w": float|None,
+                   "high_52w_date": str|None, "low_52w": float|None,
+                   "low_52w_date": str|None}}，date 为交易所日期。
     results 与请求 symbols 顺序对应。
     """
     url = "https://api.robinhood.com/fundamentals/?symbols=" + ",".join(symbols)
     r = requests.get(url, headers=UA, timeout=TIMEOUT)
     r.raise_for_status()
     results = r.json().get("results", [])
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
     out = {}
     for sym, item in zip(symbols, results):
         pe = item.get("pe_ratio")
         if pe is None:
             continue
-        out[sym] = (float(pe), item.get("market_date"))
+        out[sym] = {"pe": float(pe), "date": item.get("market_date"),
+                    "high_52w": _f(item.get("high_52_weeks")),
+                    "high_52w_date": item.get("high_52_weeks_date"),
+                    "low_52w": _f(item.get("low_52_weeks")),
+                    "low_52w_date": item.get("low_52_weeks_date")}
     if "QQQ" not in out or "SOXX" not in out:
         raise RuntimeError("Robinhood 未返回 QQQ/SOXX 的 pe_ratio")
     return out
@@ -259,13 +272,18 @@ def fetch_zacks_pe(symbol):
 def fetch_daily_pe():
     """日度 trailing P/E：Robinhood 主，Zacks 备。
 
-    返回 {symbol: {"pe": float, "date": str, "src": str}}。
+    返回 {symbol: {"pe": float, "date": str, "src": str,
+                   "high_52w"...（仅 Robinhood 有 52 周高低）}}。
     主备口径不同，调用方须按实际 src 标注来源。
     """
     out = {}
     try:
-        for sym, (pe, date) in fetch_robinhood_pe().items():
-            out[sym] = {"pe": pe, "date": date, "src": "Robinhood"}
+        for sym, info in fetch_robinhood_pe().items():
+            out[sym] = {"pe": info["pe"], "date": info["date"], "src": "Robinhood",
+                        "high_52w": info["high_52w"],
+                        "high_52w_date": info["high_52w_date"],
+                        "low_52w": info["low_52w"],
+                        "low_52w_date": info["low_52w_date"]}
     except Exception:
         pass
     for sym in ("QQQ", "SOXX"):

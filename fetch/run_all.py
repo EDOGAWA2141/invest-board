@@ -147,8 +147,13 @@ def build_qqq_pe(raw):
     ind["delta"] = None
     ind["prev"] = None
     ind["signal"] = compute.signal_pe(ind["percentile_10y"])
-    ind["extra"] = {"月度序列最新（worldperatio 口径）":
-                    f"{hist[-1][1]}（{hist[-1][0]}）"}
+    extra = {"月度序列最新（worldperatio 口径）":
+             f"{hist[-1][1]}（{hist[-1][0]}）"}
+    if d.get("high_52w"):
+        extra["52周最高"] = f"{d['high_52w']:.2f}（{d.get('high_52w_date')}）"
+    if d.get("low_52w"):
+        extra["52周最低"] = f"{d['low_52w']:.2f}（{d.get('low_52w_date')}）"
+    ind["extra"] = extra
     return ind
 
 
@@ -162,9 +167,9 @@ def build_qqq_forward_pe(raw):
         "forward PE 无免费长期历史，本序列自首次抓取起每月自动存档、逐步积累；口径固定为 Siblis")
     finalize(ind, [(d, v) for d, v in hist])
     n = len(hist)
-    if ind["percentile_10y"] is None or n < 24:
+    if ind["percentile_10y"] is None or n < 12:
         ind["percentile_10y"] = None
-        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 24 个月后启用百分位）"
+        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 12 个月后启用百分位）"
         ind["signal"] = {"label": "历史序列积累中（每月自动存档）", "tone": "neutral"}
     else:
         ind["signal"] = compute.signal_pe(ind["percentile_10y"])
@@ -187,9 +192,9 @@ def build_it_forward_pe(raw):
         "forward PE 无免费长期历史，本序列自首次抓取起每月自动存档、逐步积累；口径固定为 Siblis")
     finalize(ind, [(d, v) for d, v in hist])
     n = len(hist)
-    if ind["percentile_10y"] is None or n < 24:
+    if ind["percentile_10y"] is None or n < 12:
         ind["percentile_10y"] = None
-        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 24 个月后启用百分位）"
+        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 12 个月后启用百分位）"
         ind["signal"] = {"label": "历史序列积累中（每月自动存档）", "tone": "neutral"}
     else:
         ind["signal"] = compute.signal_pe(ind["percentile_10y"])
@@ -219,12 +224,19 @@ def build_soxx_pe(raw):
     if age_days > 7:
         ind["signal"] = {"label": f"日度数据已 {age_days} 天未更新（截至 {asof}），请检查抓取",
                          "tone": "warn"}
-    elif ind["percentile_10y"] is None or n < 24:
+    elif ind["percentile_10y"] is None or n < 12:
         ind["percentile_10y"] = None
-        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 24 个月后启用百分位）"
+        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 12 个月后启用百分位）"
         ind["signal"] = {"label": "历史序列积累中（每月自动存档）", "tone": "neutral"}
     else:
         ind["signal"] = compute.signal_pe(ind["percentile_10y"])
+    extra = {}
+    if d.get("high_52w"):
+        extra["52周最高"] = f"{d['high_52w']:.2f}（{d.get('high_52w_date')}）"
+    if d.get("low_52w"):
+        extra["52周最低"] = f"{d['low_52w']:.2f}（{d.get('low_52w_date')}）"
+    if extra:
+        ind["extra"] = extra
     return ind
 
 
