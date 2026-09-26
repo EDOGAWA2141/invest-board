@@ -261,13 +261,13 @@ def build_net_buybacks(raw):
     """非金融企业净回购（TTM）：美联储 Z.1 股票净发行取反。
 
     BOGZ1FU103164103Q 为季度 NSA 真实季度流量（百万美元，净发行口径，负值=净回购）；
-    TTM = -(近 4 季之和) / 1000，单位亿美元。非 S&P 500 毛回购口径。
+    TTM = -(近 4 季之和) / 100，单位亿美元。非 S&P 500 毛回购口径。
     """
     hist = raw["BOGZ1FU103164103Q"]
     ttm = []
     for i in range(3, len(hist)):
         q = hist[i - 3:i + 1]
-        ttm.append((q[-1][0], round(-sum(v for _, v in q) / 1000)))
+        ttm.append((q[-1][0], round(-sum(v for _, v in q) / 100)))
     ind = base_indicator(
         "us_net_buybacks", GROUP_SUPPLY, "非金融企业净回购（TTM）", "亿美元", 0, "季度",
         "FRED · Z.1", "https://fred.stlouisfed.org/series/BOGZ1FU103164103Q",
@@ -277,7 +277,7 @@ def build_net_buybacks(raw):
     finalize(ind, ttm)
     qdate, qval = hist[-1]
     extra = {
-        "最近季度净发行": f"{qval / 1000:.0f} 亿美元（正=净发行，负=净回购）",
+        "最近季度净发行": f"{qval / 100:.0f} 亿美元（正=净发行，负=净回购）",
         "数据季度": qdate[:7],
     }
     if len(ttm) >= 5 and ttm[-5][1]:
@@ -326,7 +326,7 @@ def build_ipo_count(raw):
     else:
         ind["signal"] = {"label": f"IPO 数量处历史中段（{pct}% 分位）", "tone": "neutral"}
     ind["extra"] = {
-        "当年融资额": f"{lrow['proceeds_m'] / 1000:.1f} 亿美元",
+        "当年融资额": f"{lrow['proceeds_m'] / 100:.1f} 亿美元",
         "首日平均涨幅": f"{lrow['firstday']}%",
         "数据年份": str(ly),
         "表格更新": table.get("table_updated", ""),
@@ -407,7 +407,7 @@ def build_fed_assets(raw):
 
 
 def build_onrrp(raw):
-    ind = _liquidity("us_onrrp", "ON RRP 用量", raw["RRPONTSYD"], "亿美元", 1, 1e3,
+    ind = _liquidity("us_onrrp", "ON RRP 用量", raw["RRPONTSYD"], "亿美元", 1, 1e2,
                      "https://fred.stlouisfed.org/series/RRPONTSYD",
                      "过剩流动性水位计：用量越低，QT 的边际冲击越直接传导至银行准备金")
     v = ind["latest"]["value"]
