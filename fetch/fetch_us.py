@@ -12,8 +12,7 @@
 - production.dataviz.cnn.io/index/fearandgreed/graphdata ：CNN 恐惧贪婪指数（日度，免 key JSON，需浏览器 UA）
 - Robinhood fundamentals API：QQQ / SOXX / SMH trailing P/E（日度快照，免 key JSON）
   Zacks quote-feed 为备用源
-- site.warrington.ufl.edu/ritter/files/IPO-Statistics.pdf ：
-  Jay Ritter IPO-Statistics Table 8（年度 IPO 家数/融资额/首日涨幅，1960 起，每年 1 月更新）
+- renaissancecapital.com/IPO-Center/Stats ：Renaissance Capital 当年 YTD 已定价 IPO 家数/融资额/同比（日度更新）
 """
 import csv
 import io
@@ -343,57 +342,11 @@ def fetch_daily_pe():
     return out
 
 
-# ---------------- Jay Ritter IPO 统计 ----------------
-RITTER_PDF_URL = "https://site.warrington.ufl.edu/ritter/files/IPO-Statistics.pdf"
-_RITTER_ROW = re.compile(
-    r"\s*(19\d\d|20\d\d)\s+(\d[\d,]*)\s+(-?[\d.]+%)\s+([\d,]+)\s*$")
-
-
-def fetch_ritter_ipo():
-    """Jay Ritter IPO-Statistics.pdf Table 8：年度 IPO 家数/首日涨幅/融资额（1960 起）。
-
-    返回 {"rows": {year: {"offerings","firstday","proceeds_m"}}, "table_updated": ...}。
-    PDF 每年 1 月更新上年数据；解析行数不足（<60）时抛错。
-    """
-    from pypdf import PdfReader
-    r = requests.get(RITTER_PDF_URL, headers=UA, timeout=TIMEOUT)
-    r.raise_for_status()
-    pages = [p.extract_text() or "" for p in PdfReader(io.BytesIO(r.content)).pages]
-    start = next(
-        i for i, t in enumerate(pages)
-        if i > 0 and "Table 8" in t
-        and any(_RITTER_ROW.match(l.strip()) for l in t.split("\n"))
-    )
-    end = None
-    for i in range(start + 1, len(pages)):
-        m = re.search(r"\nTable (\d+[a-z]?)\b", "\n" + pages[i])
-        if m and m.group(1) != "8":
-            end = i
-            break
-    text = "\n".join(pages[start:end or start + 6])
-    rows = {}
-    for line in text.split("\n"):
-        m = _RITTER_ROW.match(line.strip())
-        if m:
-            rows[int(m.group(1))] = {
-                "offerings": int(m.group(2).replace(",", "")),
-                "firstday": float(m.group(3).rstrip("%")),
-                "proceeds_m": int(m.group(4).replace(",", "")),
-            }
-    if len(rows) < 60:
-        raise RuntimeError(f"Ritter Table 8 解析行数过少（{len(rows)}）")
-    upd = re.search(r"Table 8\s*\(updated\s+([^)]+)\)", text)
-    return {
-        "rows": rows,
-        "table_updated": upd.group(1).strip() if upd else "",
-        "source": "Jay Ritter, Warrington College of Business, University of Florida",
-    }
-
-
+# ---------------- Renaissance Capital 当年 IPO ----------------
 def fetch_renaissance_ytd():
     """Renaissance Capital IPO-Center Stats：当年 YTD 已定价 IPO 家数与融资额。
 
-    口径：市值 ≥ $50mm 的美国 IPO（与 Ritter 年度口径不同，仅作当年参考，不参与百分位）。
+    口径：市值 ≥ $50mm 的美国 IPO；同比为与去年同期比较。
     返回 {"count": int, "proceeds_bil": float}；失败抛异常由调用方兜底。"""
     url = "https://www.renaissancecapital.com/IPO-Center/Stats"
     r = requests.get(url, headers=UA, timeout=TIMEOUT)
@@ -402,11 +355,13 @@ def fetch_renaissance_ytd():
     text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
-    m1 = re.search(r"There have been (\d+) IPOs priced this year", text)
-    m2 = re.search(r"Total proceeds raised were \$([\d.]+) bil this year", text)
+    m1 = re.search(r"There have been (\d+) IPOs priced this year(?:, a ([+-]?[\d.]+)% change from last year)?", text)
+    m2 = re.search(r"Total proceeds raised were \$([\d.]+) bil this year(?:, a ([+-]?[\d.]+)% change from last year)?", text)
     if not (m1 and m2):
         raise RuntimeError("Renaissance Capital YTD IPO 数据解析失败")
     return {"count": int(m1.group(1)), "proceeds_bil": float(m2.group(1)),
+            "count_yoy": float(m1.group(2)) if m1.group(2) else None,
+            "proceeds_yoy": float(m2.group(2)) if m2.group(2) else None,
             "source_url": url}
 
 
@@ -430,7 +385,6 @@ def fetch_all_us():
         ("IT_SIBLIS", fetch_siblis_it_sector),
         ("CNN_FEAR_GREED", fetch_cnn_fear_greed),
         ("DAILY_PE", fetch_daily_pe),
-        ("RITTER_IPO", fetch_ritter_ipo),
         ("RC_IPO_YTD", fetch_renaissance_ytd),
     ]:
         try:

@@ -44,7 +44,7 @@ HIST_SOXX = os.path.join(DATA_DIR, "_hist_soxx_pe.json")
 # 旧存档口径不可比，启用新文件重新积累。
 HIST_SOXX_RH = os.path.join(DATA_DIR, "_hist_soxx_pe_rh.json")
 # Ritter IPO Table 8 解析结果存档（PDF 抓取失败时沿用上次解析）
-HIST_IPO = os.path.join(DATA_DIR, "_hist_ipo.json")
+IPO_YTD_HIST_FILE = os.path.join(DATA_DIR, "_hist_ipo_ytd.json")
 
 GROUP_SENTIMENT = "市场情绪"
 GROUP_VAL = "美国 · 估值"
@@ -279,6 +279,7 @@ def build_net_buybacks(raw):
     extra = {
         "最近季度净发行": f"{qval / 100:.0f} 亿美元（正=净发行，负=净回购）",
         "数据季度": qdate[:7],
+        "下期数据": "2026年Q3，预计2026-12-10发布（Z.1每季度发布一次）",
     }
     if len(ttm) >= 5 and ttm[-5][1]:
         extra["TTM 同比"] = f"{round((ttm[-1][1] / ttm[-5][1] - 1) * 100, 1)}%"
@@ -288,56 +289,57 @@ def build_net_buybacks(raw):
 
 
 def build_ipo_count(raw):
-    """美国 IPO 数量（年度）：Jay Ritter IPO-Statistics Table 8，情绪反向指标。
+    """美国 IPO（当年累计）：Renaissance Capital IPO-Center Stats。
 
-    PDF 抓取失败时沿用上次解析存档并标记 stale；全新失败（无存档）则跳过。
-    百分位按 1960 起全历史计算（IPO 周期长，不用 10 年动态窗口）。
+    每日更新的当年 YTD 已定价 IPO 家数与融资额（口径：市值 ≥ $50mm 的美国 IPO），
+    同比为与去年同期比较。抓取失败时沿用本地 YTD 快照存档并标记 stale；
+    全新失败（无存档）则跳过。当年累计口径不做历史百分位。
     """
-    table = raw.get("RITTER_IPO")
+    ytd = raw.get("RC_IPO_YTD") or {}
+    hist = load_json(IPO_YTD_HIST_FILE, [])
+    today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     stale = False
-    if table:
-        save_json(HIST_IPO, table)
-    else:
-        table = load_json(HIST_IPO, None)
-        if not table:
-            raise RuntimeError("Ritter IPO 数据缺失且无存档")
+    if ytd.get("count"):
+        hist = [h for h in hist if h.get("date") != today]
+        hist.append({"date": today, "count": ytd["count"],
+                     "proceeds_bil": ytd["proceeds_bil"],
+                     "count_yoy": ytd.get("count_yoy"),
+                     "proceeds_yoy": ytd.get("proceeds_yoy")})
+        hist = hist[-400:]
+        save_json(IPO_YTD_HIST_FILE, hist)
+    elif hist:
         stale = True
-    rows = {int(k): v for k, v in table["rows"].items()}
-    years = sorted(rows)
-    hist = [(f"{y}-01-01", rows[y]["offerings"]) for y in years]
-    ly = years[-1]
-    lrow = rows[ly]
-    ind = base_indicator(
-        "us_ipo_count", GROUP_SUPPLY, "美国 IPO 数量", "家", 0, "年度",
-        "Jay Ritter · UF Warrington", "https://site.warrington.ufl.edu/ritter/ipo-data/",
-        "IPO-Statistics Table 8：年度 IPO 家数 / 融资额 / 首日平均涨幅；"
-        "1960-1974 引自 Ibbotson/Sindelar/Ritter (1994)；每年 1 月更新上年数据；"
-        "IPO 数量为情绪反向指标：高位≈市场过热、供给增加")
-    finalize(ind, hist)
-    vals = [v for _, v in hist]
-    pct = round(sum(1 for v in vals if v <= lrow["offerings"]) / len(vals) * 100, 1)
-    ind["percentile_10y"] = pct
-    ind["percentile_basis"] = f"1960–{ly} 全历史分位（{len(vals)} 个年度观测点）"
-    if pct >= 80:
-        ind["signal"] = {"label": f"IPO 数量处历史高位（{pct}% 分位）：供给增加、情绪偏热（反向指标偏谨慎）",
-                         "tone": "warn"}
-    elif pct <= 20:
-        ind["signal"] = {"label": f"IPO 数量处历史低位（{pct}% 分位）：供给收缩", "tone": "info"}
     else:
-        ind["signal"] = {"label": f"IPO 数量处历史中段（{pct}% 分位）", "tone": "neutral"}
-    ind["extra"] = {
-        "当年融资额": f"{lrow['proceeds_m'] / 100:.1f} 亿美元",
-        "首日平均涨幅": f"{lrow['firstday']}%",
-        "数据年份": str(ly),
-        "表格更新": table.get("table_updated", ""),
+        raise RuntimeError("Renaissance YTD IPO 无数据且无历史存档")
+    last = hist[-1]
+    curryear = today[:4]
+    ind = base_indicator(
+        "us_ipo_count", GROUP_SUPPLY, f"美国 IPO（{curryear}年累计）", "家", 0, "日度",
+        "Renaissance Capital", "https://www.renaissancecapital.com/IPO-Center/Stats",
+        "当年累计已定价 IPO 家数 / 融资额（口径：市值≥$5000万的美国 IPO）；"
+        "同比为与去年同期比较；IPO 融资是股权供给的重要来源，融资额大增时对市场有抽水效应")
+    finalize(ind, [(h["date"], h["count"]) for h in hist])
+    ind["percentile_10y"] = None
+    ind["percentile_basis"] = "当年累计口径：与去年同期比，不做历史百分位"
+    cy, py = last.get("count_yoy"), last.get("proceeds_yoy")
+    extra = {
+        "累计融资额": f"{last['proceeds_bil'] * 10:.0f} 亿美元（${last['proceeds_bil']:.1f}B）",
+        "统计口径": "市值≥$5000万的美国IPO",
     }
-    # 当年 YTD 参考：Renaissance Capital（口径与 Ritter 不同，仅作当年跟踪，不参与百分位）
-    ytd = raw.get("RC_IPO_YTD")
-    if isinstance(ytd, dict) and ytd.get("count"):
-        curryear = datetime.now(ZoneInfo("America/New_York")).year
-        ind["extra"][f"{curryear}年至今(Renaissance)"] = (
-            f"约{ytd['count']}家 / ${ytd['proceeds_bil']:.1f}B")
-        ind["extra"]["YTD口径"] = "市值≥$5000万的美国IPO；与Ritter年度口径不同"
+    if cy is not None:
+        extra["家数同比"] = f"{cy:+.1f}%"
+    if py is not None:
+        extra["融资额同比"] = f"{py:+.1f}%"
+    ind["extra"] = extra
+    if py is not None and py >= 100:
+        ind["signal"] = {"label": f"{curryear}年IPO融资${last['proceeds_bil']:.1f}B（同比{py:+.0f}%）：巨型IPO主导，股权供给放量",
+                         "tone": "warn"}
+    elif py is not None and py <= -50:
+        ind["signal"] = {"label": f"{curryear}年IPO融资${last['proceeds_bil']:.1f}B（同比{py:+.0f}%）：融资明显萎缩",
+                         "tone": "info"}
+    else:
+        ind["signal"] = {"label": f"{curryear}年至今已定价 {last['count']} 家",
+                         "tone": "neutral"}
     if stale:
         ind["stale"] = True
     return ind
