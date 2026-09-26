@@ -124,6 +124,17 @@ def signal_pe(pct):
     return {"label": f"估值处于十年中位附近（{pct}% 分位）", "tone": "neutral"}
 
 
+def signal_buyback(pct):
+    """企业净回购力度：分位越高，企业部门净买入越强、股权供给收缩。"""
+    if pct is None:
+        return {"label": "暂无分位数据", "tone": "neutral"}
+    if pct >= 80:
+        return {"label": f"净回购力度处十年高位（{pct}% 分位），股权供给净收缩", "tone": "ok"}
+    if pct <= 20:
+        return {"label": f"净回购力度处十年低位（{pct}% 分位），股权供给压力相对大", "tone": "warn"}
+    return {"label": f"净回购力度处十年中位附近（{pct}% 分位）", "tone": "neutral"}
+
+
 def signal_yield(pct):
     if pct is None:
         return {"label": "历史数据积累中", "tone": "neutral"}

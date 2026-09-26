@@ -11,6 +11,8 @@
 - S&P 500 信息技术板块 forward PE（Siblis 月度）为半导体前瞻估值的近似替代，
   自建月度存档；Yardeni 的 S&P 500 半导体行业 forward PE 更贴切但无稳定免费自动源。
 - CNN 恐惧贪婪指数置于页面最顶部（市场情绪分组），日度，含 9 个子指标与约 1 年历史。
+- 美国 · 股权供需：美联储 Z.1 非金融企业股票净发行（季度，负值=净回购，取反得净回购 TTM）
+  与 Jay Ritter IPO-Statistics 年度 IPO 家数（情绪反向指标）。
 """
 import json
 import os
@@ -41,9 +43,12 @@ HIST_SOXX = os.path.join(DATA_DIR, "_hist_soxx_pe.json")
 # SOXX 口径已于 2026-09-26 由 iShares factsheet 切换为 Robinhood 日度：
 # 旧存档口径不可比，启用新文件重新积累。
 HIST_SOXX_RH = os.path.join(DATA_DIR, "_hist_soxx_pe_rh.json")
+# Ritter IPO Table 8 解析结果存档（PDF 抓取失败时沿用上次解析）
+HIST_IPO = os.path.join(DATA_DIR, "_hist_ipo.json")
 
 GROUP_SENTIMENT = "市场情绪"
 GROUP_VAL = "美国 · 估值"
+GROUP_SUPPLY = "美国 · 股权供需"
 GROUP_RATE = "美国 · 利率与通胀"
 GROUP_LIQ = "美国 · 流动性"
 GROUP_CN = "中国 · 宏观与地产"
@@ -251,6 +256,86 @@ def build_sp500_pe(raw):
     return ind
 
 
+# ---------------- 美国 · 股权供需 ----------------
+def build_net_buybacks(raw):
+    """非金融企业净回购（TTM）：美联储 Z.1 股票净发行取反。
+
+    BOGZ1FU103164103Q 为季度 NSA 真实季度流量（百万美元，净发行口径，负值=净回购）；
+    TTM = -(近 4 季之和) / 1000，单位亿美元。非 S&P 500 毛回购口径。
+    """
+    hist = raw["BOGZ1FU103164103Q"]
+    ttm = []
+    for i in range(3, len(hist)):
+        q = hist[i - 3:i + 1]
+        ttm.append((q[-1][0], round(-sum(v for _, v in q) / 1000)))
+    ind = base_indicator(
+        "us_net_buybacks", GROUP_SUPPLY, "非金融企业净回购（TTM）", "亿美元", 0, "季度",
+        "FRED · Z.1", "https://fred.stlouisfed.org/series/BOGZ1FU103164103Q",
+        "美联储资金流量表 Z.1：非金融企业股票净发行（新股发行 − 回购 − 现金并购注销等），"
+        "季度 NSA 真实季度流量；负值=净回购，取反得净回购 TTM；"
+        "与 S&P 500 总回购（毛值、含金融股、约 $1T/年）口径不同，此处为全口径非金融企业的净值")
+    finalize(ind, ttm)
+    qdate, qval = hist[-1]
+    extra = {
+        "最近季度净发行": f"{qval / 1000:.0f} 亿美元（正=净发行，负=净回购）",
+        "数据季度": qdate[:7],
+    }
+    if len(ttm) >= 5 and ttm[-5][1]:
+        extra["TTM 同比"] = f"{round((ttm[-1][1] / ttm[-5][1] - 1) * 100, 1)}%"
+    ind["extra"] = extra
+    ind["signal"] = compute.signal_buyback(ind["percentile_10y"])
+    return ind
+
+
+def build_ipo_count(raw):
+    """美国 IPO 数量（年度）：Jay Ritter IPO-Statistics Table 8，情绪反向指标。
+
+    PDF 抓取失败时沿用上次解析存档并标记 stale；全新失败（无存档）则跳过。
+    百分位按 1960 起全历史计算（IPO 周期长，不用 10 年动态窗口）。
+    """
+    table = raw.get("RITTER_IPO")
+    stale = False
+    if table:
+        save_json(HIST_IPO, table)
+    else:
+        table = load_json(HIST_IPO, None)
+        if not table:
+            raise RuntimeError("Ritter IPO 数据缺失且无存档")
+        stale = True
+    rows = {int(k): v for k, v in table["rows"].items()}
+    years = sorted(rows)
+    hist = [(f"{y}-01-01", rows[y]["offerings"]) for y in years]
+    ly = years[-1]
+    lrow = rows[ly]
+    ind = base_indicator(
+        "us_ipo_count", GROUP_SUPPLY, "美国 IPO 数量", "家", 0, "年度",
+        "Jay Ritter · UF Warrington", "https://site.warrington.ufl.edu/ritter/ipo-data/",
+        "IPO-Statistics Table 8：年度 IPO 家数 / 融资额 / 首日平均涨幅；"
+        "1960-1974 引自 Ibbotson/Sindelar/Ritter (1994)；每年 1 月更新上年数据；"
+        "IPO 数量为情绪反向指标：高位≈市场过热、供给增加")
+    finalize(ind, hist)
+    vals = [v for _, v in hist]
+    pct = round(sum(1 for v in vals if v <= lrow["offerings"]) / len(vals) * 100, 1)
+    ind["percentile_10y"] = pct
+    ind["percentile_basis"] = f"1960–{ly} 全历史分位（{len(vals)} 个年度观测点）"
+    if pct >= 80:
+        ind["signal"] = {"label": f"IPO 数量处历史高位（{pct}% 分位）：供给增加、情绪偏热（反向指标偏谨慎）",
+                         "tone": "warn"}
+    elif pct <= 20:
+        ind["signal"] = {"label": f"IPO 数量处历史低位（{pct}% 分位）：供给收缩", "tone": "info"}
+    else:
+        ind["signal"] = {"label": f"IPO 数量处历史中段（{pct}% 分位）", "tone": "neutral"}
+    ind["extra"] = {
+        "当年融资额": f"{lrow['proceeds_m'] / 1000:.1f} 亿美元",
+        "首日平均涨幅": f"{lrow['firstday']}%",
+        "数据年份": str(ly),
+        "表格更新": table.get("table_updated", ""),
+    }
+    if stale:
+        ind["stale"] = True
+    return ind
+
+
 # ---------------- 美国 · 利率与通胀 ----------------
 
 def build_yield(raw):
@@ -443,6 +528,8 @@ BUILDERS = [
     ("us_it_forward_pe", build_it_forward_pe),
     ("us_sp500_pe", build_sp500_pe),
     ("us_soxx_pe", build_soxx_pe),
+    ("us_net_buybacks", build_net_buybacks),
+    ("us_ipo_count", build_ipo_count),
     ("us_10y_yield", build_yield),
     ("us_cpi_yoy", build_cpi),
     ("us_pce_yoy", build_pce),
@@ -501,7 +588,7 @@ def main():
     out = {
         "generated_at_utc": now_utc.strftime("%Y-%m-%d %H:%M UTC"),
         "generated_at_et": et.strftime("%Y-%m-%d %H:%M ET"),
-        "group_order": [GROUP_SENTIMENT, GROUP_VAL, GROUP_RATE, GROUP_LIQ, GROUP_CN],
+        "group_order": [GROUP_SENTIMENT, GROUP_VAL, GROUP_SUPPLY, GROUP_RATE, GROUP_LIQ, GROUP_CN],
         "indicators": indicators,
     }
     save_json(OUT_FILE, out)

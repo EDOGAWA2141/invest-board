@@ -3,7 +3,7 @@
 为「中国房价判断」与「美国 QQQ 走势判断」提供实时、准确数据依据的个人 dashboard。
 托管在 GitHub Pages，每日由 GitHub Actions 自动抓取最新数据并刷新。
 
-## 指标清单（共 23 个）
+## 指标清单（共 25 个）
 
 ### 市场情绪
 | 指标 | 来源 | 更新频率 | 备注 |
@@ -18,6 +18,12 @@
 | S&P 500 信息技术板块 Forward PE | Siblis Research | 月度 | 半导体前瞻估值的近似替代（SOXX 无稳定免费 forward 源）；自建存档 |
 | S&P 500 Trailing PE | worldperatio | 月度 | 单一口径，10 年百分位 |
 | SOXX Trailing P/E | Robinhood | 日度 | 日度口径；自 2026-09 起按月自建存档（旧 iShares 口径已作废） |
+
+### 美国 · 股权供需
+| 指标 | 来源 | 更新频率 | 备注 |
+|---|---|---|---|
+| 非金融企业净回购（TTM） | FRED · Z.1（`BOGZ1FU103164103Q`，季度 NSA） | 季度 | 净发行口径（发行−回购−并购注销），负值=净回购，取反得 TTM；与 S&P 500 总回购（毛值、含金融股）口径不同 |
+| 美国 IPO 数量 | Jay Ritter（UF Warrington）IPO-Statistics Table 8 | 年度（每年 1 月更新上年） | 1960 年起；含当年融资额/首日平均涨幅；数量为情绪反向指标 |
 
 ### 美国 · 利率与通胀
 | 指标 | 来源 | 更新频率 |
@@ -44,7 +50,8 @@
 | 一/二/三线城市新建商品住宅同比 | 统计局解读（当期官方加权口径）＋ 东方财富 70 城（历史研究口径：分线简单平均） | 10 年百分位 |
 | 一/二/三线城市二手住宅同比 | 同上 | 10 年百分位 |
 
-> **准确性说明**：全部使用免费公开数据源，无需任何 API key。
+> **准确性说明**：全部使用免费公开数据源。FRED 优先走官方 API（`api.stlouisfed.org`，
+> 需免费 key，见下方「FRED API key」），失败时回退无 key CSV。
 > PE 类指标各家口径差异大，本项目对同一指标终身固定一家来源，并在页面标注方法论。
 > **10 年百分位窗口为动态**：每次运行时按当天日期倒退 10 个日历年
 > （如 2026-09-26 运行则窗口为 2016-09-26 起），不写死历史日期；抓取起始日期同样动态（当天倒退 11 年）。
@@ -56,6 +63,15 @@ pip install -r fetch/requirements.txt
 python3 fetch/run_all.py   # 生成 data/indicators.json
 # 用浏览器打开 index.html 即可预览（需联网加载 Chart.js CDN）
 ```
+
+## FRED API key（免费）
+
+FRED 数据优先走官方 API（`api.stlouisfed.org`），需要一个免费 key：
+
+1. 访问 <https://fredaccount.stlouisfed.org/apikeys> 注册并申请（免费，即时生效）。
+2. GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret**，
+   Name 填 `FRED_API_KEY`，Value 填申请到的 key。
+3. 无 key 时自动回退无 key CSV 抓取（部分网络下可能被拦截，指标会沿用旧值并标记 stale）。
 
 ## 部署到 GitHub Pages
 
@@ -78,8 +94,10 @@ python3 fetch/run_all.py   # 生成 data/indicators.json
 ├── index.html                 # dashboard 页面（GitHub Pages 入口）
 ├── data/
 │   ├── indicators.json        # 每日自动生成的指标数据
-│   ├── _hist_qqq_forward_pe.json  # 自建：forward PE 月度存档
-│   └── _hist_soxx_pe.json         # 自建：SOXX PE 月度存档
+│   ├── _hist_qqq_forward_pe.json  # 自建：QQQ forward PE 月度存档
+│   ├── _hist_it_forward_pe.json   # 自建：S&P 500 信息技术 forward PE 月度存档
+│   ├── _hist_soxx_pe_rh.json      # 自建：SOXX PE（Robinhood 口径）月度存档
+│   └── _hist_ipo.json             # 存档：Ritter IPO Table 8 解析结果（PDF 失败时兜底）
 ├── fetch/
 │   ├── fetch_us.py            # 美国指标抓取
 │   ├── fetch_cn.py            # 中国指标抓取（BIS/NBS/东财/统计局解读）

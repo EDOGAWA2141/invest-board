@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""美国指标抓取：全部使用免费公开数据源，无需 API key。
+"""美国指标抓取：全部使用免费公开数据源。
 
 数据源（2026-09-26 实测可用）：
-- FRED 无 key CSV：DGS10 / CPIAUCSL / PCEPI / WALCL / RRPONTSYD / WRESBAL / DFF / M2SL
+- FRED：DGS10 / CPIAUCSL / PCEPI / WALCL / RRPONTSYD / WRESBAL / DFF / M2SL
+  / BOGZ1FU103164103Q（Z.1 非金融企业股票净发行，季度 NSA）
+  优先走官方 API（api.stlouisfed.org，需 FRED_API_KEY 环境变量），失败回退无 key CSV
 - worldperatio.com/index/nasdaq-100/ ：Nasdaq-100 trailing PE（月度，≥10 年历史，HTML 内嵌 JS 数组）
 - worldperatio.com/index/sp-500/ ：S&P 500 trailing PE（月度，≥10 年历史，同上）
 - siblisresearch.com/data/nasdaq-100-pe-ratio/ ：Nasdaq-100 forward PE 当前值（月度更新）
@@ -10,9 +12,12 @@
 - production.dataviz.cnn.io/index/fearandgreed/graphdata ：CNN 恐惧贪婪指数（日度，免 key JSON，需浏览器 UA）
 - Robinhood fundamentals API：QQQ / SOXX / SMH trailing P/E（日度快照，免 key JSON）
   Zacks quote-feed 为备用源
+- site.warrington.ufl.edu/ritter/files/IPO-Statistics.pdf ：
+  Jay Ritter IPO-Statistics Table 8（年度 IPO 家数/融资额/首日涨幅，1960 起，每年 1 月更新）
 """
 import csv
 import io
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -30,7 +35,47 @@ COSD = (datetime.now(timezone.utc).date() - timedelta(days=365 * 11)).isoformat(
 FRED_SERIES = [
     "DGS10", "CPIAUCSL", "PCEPI", "WALCL",
     "RRPONTSYD", "WRESBAL", "DFF", "M2SL",
+    "BOGZ1FU103164103Q",
 ]
+# BOGZ1FU103164103Q：Nonfinancial Corporate Business; Corporate Equities;
+# Liability, Transactions（美联储 Z.1，季度 NSA，百万美元）。
+# 含义=非金融企业股票净发行（新股发行 − 回购 − 现金并购注销等），负值=净回购。
+# 注意：NSA 为真实季度流量（非年化）；季度 SA 版本（FA 系列）为年化值，不可直接求和。
+
+
+def fetch_fred_api(series_id):
+    """FRED 官方 API（api.stlouisfed.org，需 FRED_API_KEY 环境变量）。"""
+    key = os.environ.get("FRED_API_KEY", "")
+    if not key:
+        raise RuntimeError("未设置 FRED_API_KEY")
+    url = ("https://api.stlouisfed.org/fred/series/observations"
+           f"?series_id={series_id}&api_key={key}&file_type=json"
+           f"&observation_start={COSD}&sort_order=asc")
+    r = requests.get(url, headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    rows = []
+    for o in r.json().get("observations", []):
+        d = (o.get("date") or "").strip()
+        v = (o.get("value") or "").strip()
+        if not d or v in ("", "."):
+            continue
+        try:
+            rows.append((d, float(v)))
+        except ValueError:
+            continue
+    rows.sort(key=lambda x: x[0])
+    if not rows:
+        raise RuntimeError(f"FRED API {series_id} 返回空数据")
+    return rows
+
+
+def fetch_fred(series_id):
+    """FRED：官方 API 优先（需 key），失败回退无 key CSV。"""
+    try:
+        return fetch_fred_api(series_id)
+    except Exception as e:
+        print(f"FRED API 失败 {series_id}（{e}），回退 CSV", flush=True)
+    return fetch_fred_csv(series_id)
 
 
 def fetch_fred_csv(series_id):
@@ -298,6 +343,53 @@ def fetch_daily_pe():
     return out
 
 
+# ---------------- Jay Ritter IPO 统计 ----------------
+RITTER_PDF_URL = "https://site.warrington.ufl.edu/ritter/files/IPO-Statistics.pdf"
+_RITTER_ROW = re.compile(
+    r"\s*(19\d\d|20\d\d)\s+(\d[\d,]*)\s+(-?[\d.]+%)\s+([\d,]+)\s*$")
+
+
+def fetch_ritter_ipo():
+    """Jay Ritter IPO-Statistics.pdf Table 8：年度 IPO 家数/首日涨幅/融资额（1960 起）。
+
+    返回 {"rows": {year: {"offerings","firstday","proceeds_m"}}, "table_updated": ...}。
+    PDF 每年 1 月更新上年数据；解析行数不足（<60）时抛错。
+    """
+    from pypdf import PdfReader
+    r = requests.get(RITTER_PDF_URL, headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    pages = [p.extract_text() or "" for p in PdfReader(io.BytesIO(r.content)).pages]
+    start = next(
+        i for i, t in enumerate(pages)
+        if i > 0 and "Table 8" in t
+        and any(_RITTER_ROW.match(l.strip()) for l in t.split("\n"))
+    )
+    end = None
+    for i in range(start + 1, len(pages)):
+        m = re.search(r"\nTable (\d+[a-z]?)\b", "\n" + pages[i])
+        if m and m.group(1) != "8":
+            end = i
+            break
+    text = "\n".join(pages[start:end or start + 6])
+    rows = {}
+    for line in text.split("\n"):
+        m = _RITTER_ROW.match(line.strip())
+        if m:
+            rows[int(m.group(1))] = {
+                "offerings": int(m.group(2).replace(",", "")),
+                "firstday": float(m.group(3).rstrip("%")),
+                "proceeds_m": int(m.group(4).replace(",", "")),
+            }
+    if len(rows) < 60:
+        raise RuntimeError(f"Ritter Table 8 解析行数过少（{len(rows)}）")
+    upd = re.search(r"Table 8\s*\(updated\s+([^)]+)\)", text)
+    return {
+        "rows": rows,
+        "table_updated": upd.group(1).strip() if upd else "",
+        "source": "Jay Ritter, Warrington College of Business, University of Florida",
+    }
+
+
 def fetch_all_us():
     """抓取全部美国原始序列，返回 dict(series_id -> [(date, value)]) 及估值类快照。
 
@@ -307,7 +399,7 @@ def fetch_all_us():
     out = {}
     for sid in FRED_SERIES:
         try:
-            out[sid] = fetch_fred_csv(sid)
+            out[sid] = fetch_fred(sid)
         except Exception:
             print(f"抓取失败 FRED {sid}", flush=True)
             traceback.print_exc()
@@ -318,6 +410,7 @@ def fetch_all_us():
         ("IT_SIBLIS", fetch_siblis_it_sector),
         ("CNN_FEAR_GREED", fetch_cnn_fear_greed),
         ("DAILY_PE", fetch_daily_pe),
+        ("RITTER_IPO", fetch_ritter_ipo),
     ]:
         try:
             out[name] = fn()
