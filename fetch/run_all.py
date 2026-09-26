@@ -331,6 +331,13 @@ def build_ipo_count(raw):
         "数据年份": str(ly),
         "表格更新": table.get("table_updated", ""),
     }
+    # 当年 YTD 参考：Renaissance Capital（口径与 Ritter 不同，仅作当年跟踪，不参与百分位）
+    ytd = raw.get("RC_IPO_YTD")
+    if isinstance(ytd, dict) and ytd.get("count"):
+        curryear = datetime.now(ZoneInfo("America/New_York")).year
+        ind["extra"][f"{curryear}年至今(Renaissance)"] = (
+            f"约{ytd['count']}家 / ${ytd['proceeds_bil']:.1f}B")
+        ind["extra"]["YTD口径"] = "市值≥$5000万的美国IPO；与Ritter年度口径不同"
     if stale:
         ind["stale"] = True
     return ind
@@ -545,6 +552,114 @@ BUILDERS = [
      for t in ("一线", "二线", "三线") for k in ("new", "old")]
 
 
+# ---------------- 一句话投资建议 ----------------
+
+def build_advice(indicators, et_str):
+    """按规则把关键指标合成一句话投资建议，并列出每条依据（数据 → 结论）。
+
+    分析逻辑参考权威框架：估值分位（Yardeni / Shiller CAPE 的均值回归思想）、
+    股债性价比（Fed model：盈利收益率 vs 债券收益率）、通胀 vs 2% 目标
+    （美联储政策框架）、CNN 恐惧贪婪指数（逆向情绪指标）、股权供需
+    （回购/IPO 决定流通股供给）。每日随数据自动重新生成。
+    """
+    m = {i["id"]: i for i in indicators}
+
+    def latest(id_):
+        i = m.get(id_)
+        return i["latest"]["value"] if i and isinstance(i.get("latest"), dict) else None
+
+    def pct(id_):
+        i = m.get(id_)
+        p = i.get("percentile_10y") if i else None
+        return p if isinstance(p, (int, float)) else None
+
+    clauses, basis = [], []
+    score = 0  # >0 偏多，<0 偏谨慎
+
+    # 1) 估值：十年分位
+    sp_p, sp_v = pct("us_sp500_pe"), latest("us_sp500_pe")
+    qqq_p, qqq_v = pct("us_qqq_pe"), latest("us_qqq_pe")
+    vp, vv, vname = (sp_p, sp_v, "S&P 500") if sp_p is not None else (qqq_p, qqq_v, "Nasdaq-100")
+    if vp is not None and vv is not None:
+        if vp >= 70:
+            clauses.append(f"美股估值处十年高位（{vname} trailing PE {vv}，{vp}%分位）")
+            basis.append({"数据": f"{vname} trailing PE {vv}，十年{vp}%分位",
+                          "结论": "估值偏高，未来长期回报空间被压缩（Yardeni / Shiller 估值框架）"})
+            score -= 1
+        elif vp <= 30:
+            clauses.append(f"美股估值处十年低位（{vname} trailing PE {vv}，{vp}%分位）")
+            basis.append({"数据": f"{vname} trailing PE {vv}，十年{vp}%分位",
+                          "结论": "估值偏便宜，安全边际较好"})
+            score += 1
+
+    # 2) 利率：股债性价比（Fed model 逻辑）
+    y10, y10p = latest("us_10y_yield"), pct("us_10y_yield")
+    if y10 is not None:
+        if y10 >= 4.5 or (y10p is not None and y10p >= 90):
+            clauses.append(f"10 年期美债收益率 {y10}% 处历史高位")
+            basis.append({"数据": f"10 年期收益率 {y10}%（十年{y10p}%分位）" if y10p is not None else f"10 年期收益率 {y10}%",
+                          "结论": "债券收益率走高，股票相对性价比下降（Fed model：盈利收益率 vs 债券收益率）"})
+            score -= 1
+        elif y10 <= 2.5:
+            clauses.append(f"10 年期美债收益率仅 {y10}%，利率环境友好")
+            basis.append({"数据": f"10 年期收益率 {y10}%",
+                          "结论": "无风险利率低，利于股票估值扩张"})
+            score += 1
+
+    # 3) 通胀与货币政策（美联储 2% 目标框架）
+    cpi, pce, ff = latest("us_cpi_yoy"), latest("us_pce_yoy"), latest("us_fedfunds")
+    if any(x is not None and x > 3.0 for x in (cpi, pce)):
+        clauses.append(f"通胀仍远高于 2% 目标（CPI {cpi}%、PCE {pce}%）")
+        basis.append({"数据": f"CPI {cpi}%、PCE {pce}%，联邦基金利率 {ff}%",
+                      "结论": "通胀超目标且政策利率维持高位，货币政策难转向宽松"})
+        score -= 1
+    elif cpi is not None and pce is not None and cpi <= 2.5 and pce <= 2.5:
+        clauses.append("通胀回落至目标附近")
+        basis.append({"数据": f"CPI {cpi}%、PCE {pce}%",
+                      "结论": "通胀受控，政策有宽松空间"})
+        score += 1
+
+    # 4) 情绪：CNN 恐惧贪婪（逆向指标）
+    cnn = latest("us_fear_greed")
+    if cnn is not None:
+        if cnn <= 45:
+            clauses.append(f"恐惧贪婪指数 {cnn:.0f} 处恐惧区间")
+            basis.append({"数据": f"CNN 恐惧贪婪指数 {cnn:.0f}",
+                          "结论": "市场情绪偏恐惧，逆向指标偏正面（别人恐惧时可更积极）"})
+            score += 1
+        elif cnn >= 55:
+            clauses.append(f"恐惧贪婪指数 {cnn:.0f} 处贪婪区间")
+            basis.append({"数据": f"CNN 恐惧贪婪指数 {cnn:.0f}",
+                          "结论": "市场情绪偏热，逆向指标偏谨慎"})
+            score -= 1
+
+    # 5) 股权供需：企业净回购
+    bbp, bbv = pct("us_net_buybacks"), latest("us_net_buybacks")
+    if bbp is not None and bbv is not None:
+        if bbp <= 20:
+            amt = f"净发行 {-bbv:.0f}" if bbv < 0 else f"净回购 {bbv:.0f}"
+            clauses.append(f"企业股权供给压力大（TTM{amt}亿美元，{bbp}%分位）")
+            basis.append({"数据": f"非金融企业股票净回购 TTM {bbv:.0f} 亿美元（十年{bbp}%分位）",
+                          "结论": "企业回购是美股重要买盘，转弱意味着股权供给相对增加"})
+            score -= 1
+        elif bbp >= 80:
+            clauses.append(f"企业回购力度强（TTM 净回购 {bbv:.0f} 亿美元，{bbp}%分位）")
+            basis.append({"数据": f"非金融企业股票净回购 TTM {bbv:.0f} 亿美元（十年{bbp}%分位）",
+                          "结论": "回购提供持续买盘，对股价有支撑"})
+            score += 1
+
+    if score <= -2:
+        stance, action = "偏谨慎", "可适当降低权益仓位、增配短久期债券或现金，等待更好的风险回报比"
+    elif score >= 2:
+        stance, action = "偏积极", "可在市场回调中分批布局优质资产"
+    else:
+        stance, action = "中性", "保持均衡配置，不追高也不杀跌"
+
+    text = f"综合建议{stance}：" + "；".join(clauses) + f"。{action}。"
+    return {"text": text, "stance": stance, "score": score,
+            "basis": basis, "generated_at_et": et_str}
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     prev = load_json(OUT_FILE, {})
@@ -590,6 +705,7 @@ def main():
         "generated_at_et": et.strftime("%Y-%m-%d %H:%M ET"),
         "group_order": [GROUP_SENTIMENT, GROUP_VAL, GROUP_SUPPLY, GROUP_RATE, GROUP_LIQ, GROUP_CN],
         "indicators": indicators,
+        "advice": build_advice(indicators, et.strftime("%Y-%m-%d %H:%M ET")),
     }
     save_json(OUT_FILE, out)
     print(f"已写入 {OUT_FILE}，共 {len(indicators)} 个指标")

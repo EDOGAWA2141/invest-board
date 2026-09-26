@@ -390,6 +390,26 @@ def fetch_ritter_ipo():
     }
 
 
+def fetch_renaissance_ytd():
+    """Renaissance Capital IPO-Center Stats：当年 YTD 已定价 IPO 家数与融资额。
+
+    口径：市值 ≥ $50mm 的美国 IPO（与 Ritter 年度口径不同，仅作当年参考，不参与百分位）。
+    返回 {"count": int, "proceeds_bil": float}；失败抛异常由调用方兜底。"""
+    url = "https://www.renaissancecapital.com/IPO-Center/Stats"
+    r = requests.get(url, headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    text = re.sub(r"<script.*?</script>", " ", r.text, flags=re.S | re.I)
+    text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    m1 = re.search(r"There have been (\d+) IPOs priced this year", text)
+    m2 = re.search(r"Total proceeds raised were \$([\d.]+) bil this year", text)
+    if not (m1 and m2):
+        raise RuntimeError("Renaissance Capital YTD IPO 数据解析失败")
+    return {"count": int(m1.group(1)), "proceeds_bil": float(m2.group(1)),
+            "source_url": url}
+
+
 def fetch_all_us():
     """抓取全部美国原始序列，返回 dict(series_id -> [(date, value)]) 及估值类快照。
 
@@ -411,6 +431,7 @@ def fetch_all_us():
         ("CNN_FEAR_GREED", fetch_cnn_fear_greed),
         ("DAILY_PE", fetch_daily_pe),
         ("RITTER_IPO", fetch_ritter_ipo),
+        ("RC_IPO_YTD", fetch_renaissance_ytd),
     ]:
         try:
             out[name] = fn()

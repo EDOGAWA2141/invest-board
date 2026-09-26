@@ -41,6 +41,9 @@
   .method{font-size:12px;color:var(--muted);border-top:1px dashed var(--border);margin-top:10px;padding-top:8px}
   .extra{font-size:12.5px;color:var(--text);margin-top:6px}
   .extra span{margin-right:12px}
+  .advice-text{font-size:17px;font-weight:600;line-height:1.8;margin:10px 0 4px}
+  .basis{font-size:13px;margin:8px 0 0;padding-left:20px;line-height:1.9}
+  .basis b{color:var(--info)}
   .stale-tag{display:inline-block;font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;margin-left:8px}
   canvas{max-height:180px;margin-top:8px}
   footer{margin:40px 0 30px;font-size:12.5px;color:var(--muted);line-height:1.8}
@@ -172,6 +175,18 @@ fetch('data/indicators.json')
       });
       content.appendChild(sec);
     });
+    // 一句话投资建议（页面最下方，每日随数据自动重新生成）
+    if (data.advice){
+      const a = data.advice;
+      const basis = (a.basis||[]).map(b=>`<li><b>${b['数据']}</b> → ${b['结论']}</li>`).join('');
+      const sec = document.createElement('div');
+      sec.innerHTML = `<h2 class="group">一句话投资建议</h2>
+        <div class="card"><div class="advice-text">${a.text}</div>
+        <div class="meta">生成时间：${a.generated_at_et||''} · 每日随数据自动更新</div>
+        <div class="method">依据（数据 → 结论）：</div><ul class="basis">${basis}</ul>
+        <div class="method">仅供参考，不构成投资建议。</div></div>`;
+      content.appendChild(sec);
+    }
   })
   .catch(err=>{
     document.getElementById('loading').textContent = '数据加载失败：'+err.message+'（每日自动任务生成 data/indicators.json 后恢复）';
