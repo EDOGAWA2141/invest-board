@@ -45,7 +45,7 @@ FRED_SERIES = [
 
 def fetch_fred_api(series_id):
     """FRED 官方 API（api.stlouisfed.org，需 FRED_API_KEY 环境变量）。"""
-    key = os.environ.get("FRED_API_KEY", "")
+    key = os.environ.get("FRED_API_KEY", "").strip()
     if not key:
         raise RuntimeError("未设置 FRED_API_KEY")
     url = ("https://api.stlouisfed.org/fred/series/observations"
