@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>投资指标 Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280;
+    --border:#e5e7eb; --danger:#d93025; --warn:#e8710a; --ok:#188038;
+    --info:#1a73e8; --neutral:#5f6368;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text)}
+  header{background:#111827;color:#fff;padding:28px 20px 22px}
+  header .wrap{max-width:1180px;margin:0 auto}
+  header h1{margin:0 0 6px;font-size:26px}
+  header p{margin:4px 0;color:#9ca3af;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+  #alerts{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 4px}
+  .alert{border-left:4px solid;padding:10px 14px;border-radius:8px;background:#fff;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .alert.danger{border-color:var(--danger)} .alert.warn{border-color:var(--warn)}
+  .alert.ok{border-color:var(--ok)} .alert.info{border-color:var(--info)}
+  h2.group{font-size:19px;margin:30px 0 12px;padding-bottom:8px;border-bottom:2px solid #111827}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .card h3{margin:0 0 2px;font-size:16px}
+  .card .src{font-size:12px;color:var(--muted)}
+  .card .src a{color:var(--info);text-decoration:none}
+  .big{font-size:34px;font-weight:700;margin:10px 0 2px}
+  .big small{font-size:15px;font-weight:400;color:var(--muted)}
+  .meta{font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .delta-up{color:var(--danger)} .delta-down{color:var(--ok)}
+  .badge{display:inline-block;font-size:13px;padding:5px 12px;border-radius:20px;margin:8px 0;color:#fff;background:var(--neutral)}
+  .badge.danger{background:var(--danger)} .badge.warn{background:var(--warn)}
+  .badge.ok{background:var(--ok)} .badge.info{background:var(--info)}
+  .pbar{position:relative;height:10px;border-radius:5px;background:linear-gradient(90deg,#e0e7ff,#1a73e8);margin:12px 0 4px}
+  .pbar .mark{position:absolute;top:-4px;width:3px;height:18px;background:#111827;border-radius:2px}
+  .pnote{font-size:12px;color:var(--muted)}
+  .method{font-size:12px;color:var(--muted);border-top:1px dashed var(--border);margin-top:10px;padding-top:8px}
+  .extra{font-size:12.5px;color:var(--text);margin-top:6px}
+  .extra span{margin-right:12px}
+  .stale-tag{display:inline-block;font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;margin-left:8px}
+  canvas{max-height:180px;margin-top:8px}
+  footer{margin:40px 0 30px;font-size:12.5px;color:var(--muted);line-height:1.8}
+  footer a{color:var(--info)}
+  #loading{text-align:center;padding:60px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>📊 投资指标 Dashboard</h1>
+    <p>为「中国房价判断」与「美国 QQQ 走势判断」提供实时、准确的数据依据</p>
+    <p id="gen-time">数据加载中…</p>
+    <p>每日自动更新（美东时间下午 2 点后抓取）· 全部数据来自免费公开 API / 官方来源</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="loading">正在加载指标数据…</div>
+  <div id="alerts"></div>
+  <div id="content"></div>
+
+  <footer>
+    <h3>方法论与口径说明</h3>
+    <ul>
+      <li><b>10 年百分位</b>：当前值在过去 10 年观测值中的分位。百分位 ≥80% 视为偏高，≤20% 视为偏低。</li>
+      <li><b>PE 口径</b>：QQQ trailing PE headline 使用 Robinhood 日度口径，10 年百分位沿用 worldperatio 月度序列（双口径已在卡片注明）；SOXX trailing P/E 使用 Robinhood 日度口径。各家 PE 口径差异很大，不可混用比较。</li>
+      <li><b>Forward PE</b>：无免费长期历史，dashboard 自首次运行起每月自动存档，满 24 个月后启用百分位。</li>
+      <li><b>10 年期美债贵/便宜</b>：收益率处于十年高位 → 债券相对便宜；收益率处于十年低位 → 债券相对偏贵。</li>
+      <li><b>通胀</b>：看同比与美联储 2% 目标的距离。</li>
+      <li><b>流动性</b>：美联储总资产（QE/QT 阀门）+ ON RRP 用量（过剩流动性水位）+ 银行准备金（缓冲）看"量"，有效联邦基金利率看"价"，M2 看总量背景。</li>
+    </ul>
+    <p>数据来源：FRED（圣路易斯联储）、worldperatio、Siblis Research、Robinhood（日度估值，Zacks 备用）。页面数据每日由 GitHub Actions 自动抓取更新。</p>
+    <p>⚠️ 本页面仅供研究参考，不构成投资建议。估值分位反映历史相对位置，不预测未来走势。</p>
+  </footer>
+</div>
+
+<script>
+const TONE_CN = {danger:'偏高/谨慎', warn:'关注', ok:'偏低/便宜', info:'信息', neutral:'中性'};
+
+function toneClass(t){ return ['danger','warn','ok','info'].includes(t) ? t : ''; }
+
+function makeChart(canvas, history, unit){
+  let labels = history.map(p=>p[0]);
+  let values = history.map(p=>p[1]);
+  // 降采样：超过 1200 点则抽稀
+  if (labels.length > 1200){
+    const step = Math.ceil(labels.length/1200);
+    labels = labels.filter((_,i)=>i%step===0);
+    values = values.filter((_,i)=>i%step===0);
+  }
+  new Chart(canvas, {
+    type:'line',
+    data:{labels, datasets:[{data:values, borderColor:'#1a73e8', borderWidth:1.5, pointRadius:0, fill:true,
+      backgroundColor:'rgba(26,115,232,.08)', tension:.1}]},
+    options:{plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.parsed.y} ${unit||''}`}}},
+      scales:{x:{ticks:{maxTicksLimit:5, font:{size:10}}}, y:{ticks:{font:{size:10}}}},
+      interaction:{mode:'index', intersect:false}}
+  });
+}
+
+function cardHTML(ind){
+  const v = ind.latest.value;
+  const unit = ind.unit || '';
+  const dec = ind.decimals ?? 2;
+  const vstr = (v===null||v===undefined) ? '—' : Number(v).toFixed(dec);
+  let deltaHtml = '';
+  if (ind.delta !== undefined && ind.delta !== null){
+    const d = ind.delta;
+    const cls = d > 0 ? 'delta-up' : (d < 0 ? 'delta-down' : '');
+    const arrow = d > 0 ? '▲' : (d < 0 ? '▼' : '—');
+    deltaHtml = ` <span class="${cls}" style="font-size:14px">${arrow} ${Math.abs(d).toFixed(dec)}</span>`;
+  }
+  const stale = ind.stale ? '<span class="stale-tag">上次成功数据（本次抓取失败）</span>' : '';
+  const sig = ind.signal || {label:'', tone:'neutral'};
+  let pbar = '';
+  if (ind.percentile_10y !== null && ind.percentile_10y !== undefined){
+    const p = Math.max(0, Math.min(100, ind.percentile_10y));
+    pbar = `<div class="pbar"><div class="mark" style="left:calc(${p}% - 1px)"></div></div>
+            <div class="pnote">10 年百分位：<b>${ind.percentile_10y}%</b>（${ind.percentile_basis||''}）</div>`;
+  } else if (ind.percentile_basis){
+    pbar = `<div class="pnote">10 年百分位：${ind.percentile_basis}</div>`;
+  }
+  let extra = '';
+  if (ind.extra){
+    extra = '<div class="extra">' + Object.entries(ind.extra)
+      .map(([k,val])=>`<span>${k}：<b>${val}</b></span>`).join('') + '</div>';
+  }
+  return `<div class="card">
+    <h3>${ind.name}${stale}</h3>
+    <div class="src">来源：<a href="${ind.source_url}" target="_blank" rel="noopener">${ind.source}</a> · ${ind.frequency||''}</div>
+    <div class="big">${vstr} <small>${unit}</small>${deltaHtml}</div>
+    <div class="meta">截至 ${ind.latest.date}（较上期）</div>
+    <span class="badge ${toneClass(sig.tone)}">${sig.label}</span>
+    ${pbar}${extra}
+    <canvas></canvas>
+    <div class="method">${ind.method||''}</div>
+  </div>`;
+}
+
+fetch('data/indicators.json')
+  .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+  .then(data=>{
+    document.getElementById('loading').style.display='none';
+    document.getElementById('gen-time').textContent =
+      `数据更新时间：${data.generated_at_et}（${data.generated_at_utc}）`;
+    // 信号汇总
+    const alerts = data.indicators.filter(i=>i.signal && ['danger','warn'].includes(i.signal.tone) && !i.stale);
+    document.getElementById('alerts').innerHTML = alerts.map(i=>
+      `<div class="alert ${i.signal.tone}"><b>${i.name}</b>：${i.signal.label}</div>`).join('');
+    // 分组渲染
+    const groups = {};
+    data.indicators.forEach(i=>{ (groups[i.group]=groups[i.group]||[]).push(i); });
+    const order = data.group_order || Object.keys(groups);
+    const content = document.getElementById('content');
+    order.forEach(g=>{
+      if(!groups[g] || !groups[g].length) return;
+      const sec = document.createElement('div');
+      sec.innerHTML = `<h2 class="group">${g}</h2><div class="grid"></div>`;
+      const grid = sec.querySelector('.grid');
+      groups[g].forEach(ind=>{
+        const tmp = document.createElement('div');
+        tmp.innerHTML = cardHTML(ind);
+        const card = tmp.firstElementChild;
+        grid.appendChild(card);
+        if (ind.history && ind.history.length > 1){
+          makeChart(card.querySelector('canvas'), ind.history, ind.unit);
+        }
+      });
+      content.appendChild(sec);
+    });
+  })
+  .catch(err=>{
+    document.getElementById('loading').textContent = '数据加载失败：'+err.message+'（每日自动任务生成 data/indicators.json 后恢复）';
+  });
+</script>
+</body>
+</html>
