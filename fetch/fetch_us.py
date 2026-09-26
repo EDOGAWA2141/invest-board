@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""美国指标抓取：全部使用免费公开数据源，无需 API key。
+"""美国指标抓取：全部使用免费公开数据源。
 
 数据源（2026-09-26 实测可用）：
-- FRED 无 key CSV：DGS10 / CPIAUCSL / PCEPI / WALCL / RRPONTSYD / WRESBAL / DFF / M2SL
+- FRED：优先官方 API（api.stlouisfed.org，需免费 key，见 README），
+  回退无 key CSV。DGS10 / CPIAUCSL / PCEPI / WALCL / RRPONTSYD / WRESBAL / DFF / M2SL
+  注：fred.stlouisfed.org 域名会拦截部分云服务器 IP（如 GitHub Actions），
+  此时必须配置 FRED_API_KEY 才能抓到 FRED 数据。
 - worldperatio.com/index/nasdaq-100/ ：Nasdaq-100 trailing PE（月度，≥10 年历史，HTML 内嵌 JS 数组）
 - siblisresearch.com/data/nasdaq-100-pe-ratio/ ：Nasdaq-100 forward PE 当前值（月度更新）
 - Robinhood fundamentals API：QQQ / SOXX / SMH trailing P/E（日度快照，免 key JSON）
@@ -10,6 +13,7 @@
 """
 import csv
 import io
+import os
 import re
 from datetime import datetime, timezone
 
@@ -26,6 +30,41 @@ FRED_SERIES = [
     "DGS10", "CPIAUCSL", "PCEPI", "WALCL",
     "RRPONTSYD", "WRESBAL", "DFF", "M2SL",
 ]
+
+
+def fetch_fred_api(series_id, api_key):
+    """FRED 官方 API（api.stlouisfed.org，免费 key），返回 [(date_str, value)] 按日期升序。"""
+    url = ("https://api.stlouisfed.org/fred/series/observations"
+           f"?series_id={series_id}&api_key={api_key}&file_type=json"
+           f"&observation_start={COSD}")
+    r = requests.get(url, headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    rows = []
+    for o in r.json().get("observations", []):
+        d = (o.get("date") or "").strip()
+        v = (o.get("value") or "").strip()
+        if not d or v in ("", "."):
+            continue
+        try:
+            rows.append((d, float(v)))
+        except ValueError:
+            continue
+    rows.sort(key=lambda x: x[0])
+    if not rows:
+        raise RuntimeError(f"FRED API {series_id} 返回空数据")
+    return rows
+
+
+def fetch_fred(series_id):
+    """FRED 抓取：有 FRED_API_KEY 环境变量时走官方 API，否则走无 key CSV；
+    API 失败时回退 CSV。"""
+    api_key = os.environ.get("FRED_API_KEY", "").strip()
+    if api_key:
+        try:
+            return fetch_fred_api(series_id, api_key)
+        except Exception as e:
+            print(f"FRED API 失败 {series_id}（{type(e).__name__}），回退 CSV", flush=True)
+    return fetch_fred_csv(series_id)
 
 
 def fetch_fred_csv(series_id):
@@ -197,7 +236,7 @@ def fetch_all_us():
     out = {}
     for sid in FRED_SERIES:
         try:
-            out[sid] = fetch_fred_csv(sid)
+            out[sid] = fetch_fred(sid)
         except Exception:
             print(f"抓取失败 FRED {sid}", flush=True)
             traceback.print_exc()

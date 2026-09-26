@@ -29,6 +29,8 @@ jobs:
         run: pip install -r fetch/requirements.txt
 
       - name: 抓取并计算指标
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python3 fetch/run_all.py
 
       - name: 提交数据更新

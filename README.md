@@ -38,6 +38,16 @@
 | 一/二/三线城市二手住宅同比 | 同上 | 10 年百分位 |
 
 > **准确性说明**：全部使用免费公开数据源，无需任何 API key。
+> **FRED 数据需要 API key**：`fred.stlouisfed.org` 会拦截部分云服务器 IP（如 GitHub Actions），
+> 无 key 的 CSV 方式在这些环境下抓不到数据。请免费申请一个 FRED API key 并配置到仓库：
+>
+> 1. 访问 https://fredaccount.stlouisfed.org/apikeys 注册账号（免费），申请 API key（秒批）；
+> 2. 仓库 **Settings → Secrets and variables → Actions → New repository secret**，
+>    Name 填 `FRED_API_KEY`，Value 粘贴 key；
+> 3. 在 Actions 页面手动触发一次 `每日更新指标数据`（或等次日自动运行），8 个 FRED 指标即会补齐。
+>
+> 其余数据源（worldperatio / Siblis / Robinhood / BIS / 国家统计局 / 东方财富）均无需 key。
+
 > PE 类指标各家口径差异大，本项目对同一指标终身固定一家来源，并在页面标注方法论。
 
 ## 本地运行
