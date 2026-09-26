@@ -3,14 +3,21 @@
 为「中国房价判断」与「美国 QQQ 走势判断」提供实时、准确数据依据的个人 dashboard。
 托管在 GitHub Pages，每日由 GitHub Actions 自动抓取最新数据并刷新。
 
-## 指标清单
+## 指标清单（共 23 个）
+
+### 市场情绪
+| 指标 | 来源 | 更新频率 | 备注 |
+|---|---|---|---|
+| CNN 恐惧贪婪指数 | CNN Business（官方 JSON 接口） | 日度 | 0=极度恐惧，100=极度贪婪；含 9 个子指标；页面最顶部展示 |
 
 ### 美国 · 估值
 | 指标 | 来源 | 更新频率 | 备注 |
 |---|---|---|---|
-| QQQ / Nasdaq-100 Trailing PE（含 10 年百分位） | Robinhood（日度 headline）＋ worldperatio（月度序列算百分位） | 日度 | 双口径已在卡片注明 |
+| QQQ / Nasdaq-100 Trailing PE | Robinhood（日度 headline）＋ worldperatio（10 年百分位） | 日度 | 双口径已注明，不可跨口径比较绝对值 |
 | QQQ / Nasdaq-100 Forward PE | Siblis Research | 月度 | 无免费长期历史，自建存档，满 24 个月启用百分位 |
-| SOXX Trailing P/E | Robinhood（Zacks 备用） | 日度 | 日度口径，自建月度存档 |
+| S&P 500 信息技术板块 Forward PE | Siblis Research | 月度 | 半导体前瞻估值的近似替代（SOXX 无稳定免费 forward 源）；自建存档 |
+| S&P 500 Trailing PE | worldperatio | 月度 | 单一口径，10 年百分位 |
+| SOXX Trailing P/E | Robinhood | 日度 | 日度口径；自 2026-09 起按月自建存档（旧 iShares 口径已作废） |
 
 ### 美国 · 利率与通胀
 | 指标 | 来源 | 更新频率 |
@@ -38,17 +45,9 @@
 | 一/二/三线城市二手住宅同比 | 同上 | 10 年百分位 |
 
 > **准确性说明**：全部使用免费公开数据源，无需任何 API key。
-> **FRED 数据需要 API key**：`fred.stlouisfed.org` 会拦截部分云服务器 IP（如 GitHub Actions），
-> 无 key 的 CSV 方式在这些环境下抓不到数据。请免费申请一个 FRED API key 并配置到仓库：
->
-> 1. 访问 https://fredaccount.stlouisfed.org/apikeys 注册账号（免费），申请 API key（秒批）；
-> 2. 仓库 **Settings → Secrets and variables → Actions → New repository secret**，
->    Name 填 `FRED_API_KEY`，Value 粘贴 key；
-> 3. 在 Actions 页面手动触发一次 `每日更新指标数据`（或等次日自动运行），8 个 FRED 指标即会补齐。
->
-> 其余数据源（worldperatio / Siblis / Robinhood / BIS / 国家统计局 / 东方财富）均无需 key。
-
 > PE 类指标各家口径差异大，本项目对同一指标终身固定一家来源，并在页面标注方法论。
+> **10 年百分位窗口为动态**：每次运行时按当天日期倒退 10 个日历年
+> （如 2026-09-26 运行则窗口为 2016-09-26 起），不写死历史日期；抓取起始日期同样动态（当天倒退 11 年）。
 
 ## 本地运行
 
@@ -80,8 +79,7 @@ python3 fetch/run_all.py   # 生成 data/indicators.json
 ├── data/
 │   ├── indicators.json        # 每日自动生成的指标数据
 │   ├── _hist_qqq_forward_pe.json  # 自建：forward PE 月度存档
-│   ├── _hist_soxx_pe_rh.json        # 自建：SOXX PE 月度存档（Robinhood 口径）
-│   └── _hist_soxx_pe.json           # 作废：旧 iShares 口径存档（保留备查）
+│   └── _hist_soxx_pe.json         # 自建：SOXX PE 月度存档
 ├── fetch/
 │   ├── fetch_us.py            # 美国指标抓取
 │   ├── fetch_cn.py            # 中国指标抓取（BIS/NBS/东财/统计局解读）

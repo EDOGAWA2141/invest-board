@@ -7,6 +7,10 @@
 - QQQ trailing PE headline 为 Robinhood 日度快照，10 年百分位沿用 worldperatio
   月度序列（双口径，页面注明）；SOXX trailing P/E 为 Robinhood 日度口径，
   自 2026-09 起按月存档（旧 iShares 口径存档已作废）。
+- S&P 500 trailing PE 为 worldperatio 月度序列（单一口径）。
+- S&P 500 信息技术板块 forward PE（Siblis 月度）为半导体前瞻估值的近似替代，
+  自建月度存档；Yardeni 的 S&P 500 半导体行业 forward PE 更贴切但无稳定免费自动源。
+- CNN 恐惧贪婪指数置于页面最顶部（市场情绪分组），日度，含 9 个子指标与约 1 年历史。
 """
 import json
 import os
@@ -32,11 +36,13 @@ except Exception:
 
 OUT_FILE = os.path.join(DATA_DIR, "indicators.json")
 HIST_FWD = os.path.join(DATA_DIR, "_hist_qqq_forward_pe.json")
+HIST_IT_FWD = os.path.join(DATA_DIR, "_hist_it_forward_pe.json")
 HIST_SOXX = os.path.join(DATA_DIR, "_hist_soxx_pe.json")
 # SOXX 口径已于 2026-09-26 由 iShares factsheet 切换为 Robinhood 日度：
 # 旧存档口径不可比，启用新文件重新积累。
 HIST_SOXX_RH = os.path.join(DATA_DIR, "_hist_soxx_pe_rh.json")
 
+GROUP_SENTIMENT = "市场情绪"
 GROUP_VAL = "美国 · 估值"
 GROUP_RATE = "美国 · 利率与通胀"
 GROUP_LIQ = "美国 · 流动性"
@@ -90,6 +96,42 @@ def finalize(ind, history, headline_value=None, headline_date=None):
     return ind
 
 
+# ---------------- 市场情绪 ----------------
+
+_FG_RATING_CN = {
+    "extreme fear": "极度恐惧", "fear": "恐惧", "neutral": "中性",
+    "greed": "贪婪", "extreme greed": "极度贪婪",
+}
+_FG_SUB_CN = {
+    "market_momentum_sp500": "市场动量（S&P 500）",
+    "market_momentum_sp125": "市场动量（S&P 125）",
+    "stock_price_strength": "股价强度（新高/新低）",
+    "stock_price_breadth": "市场宽度（涨跌比）",
+    "put_call_options": "Put/Call 期权情绪",
+    "market_volatility_vix": "波动率（VIX）",
+    "market_volatility_vix_50": "波动率（VIX 50日均线）",
+    "junk_bond_demand": "垃圾债需求",
+    "safe_haven_demand": "避险需求",
+}
+
+
+def build_cnn_fear_greed(raw):
+    d = raw["CNN_FEAR_GREED"]
+    ind = base_indicator(
+        "us_fear_greed", GROUP_SENTIMENT, "CNN 恐惧贪婪指数", "", 0, "日度",
+        "CNN Business", "https://www.cnn.com/markets/fear-and-greed",
+        "0=极度恐惧，100=极度贪婪；综合 7 大类子指标计算；"
+        "CNN 官方 JSON 接口（production.dataviz.cnn.io），免 key；"
+        "历史序列为接口公开的约 1 年日度数据")
+    finalize(ind, d["history"], headline_value=d["score"], headline_date=d["asof"])
+    rating_cn = _FG_RATING_CN.get(d["rating"], d["rating"])
+    ind["signal"] = {"label": f"{rating_cn}（{d['score']:.0f}/100）", "tone": "neutral"}
+    ind["extra"] = {_FG_SUB_CN.get(k, k):
+                    f"{_FG_RATING_CN.get(v['rating'], v['rating'])} {v['score']:.0f}"
+                    for k, v in d["subs"].items()}
+    return ind
+
+
 # ---------------- 美国 · 估值 ----------------
 
 def build_qqq_pe(raw):
@@ -131,6 +173,31 @@ def build_qqq_forward_pe(raw):
     return ind
 
 
+def build_it_forward_pe(raw):
+    """S&P 500 信息技术板块 forward PE：半导体前瞻估值的近似替代。"""
+    s = raw["IT_SIBLIS"]
+    asof = s["asof"] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    hist = accumulate(HIST_IT_FWD, asof, s["forward"])
+    ind = base_indicator(
+        "us_it_forward_pe", GROUP_VAL, "S&P 500 信息技术板块 Forward PE", "x", 2, "月度",
+        "Siblis Research", "https://siblisresearch.com/data/sector-pe-earnings/",
+        "SOXX / 半导体行业 forward PE 无公开免费的稳定自动来源，"
+        "此处以 S&P 500 信息技术板块 forward PE 为近似替代 "
+        "（Yardeni 的 S&P 500 半导体行业 forward PE 口径更贴切，但无稳定免费自动抓取）；"
+        "forward PE 无免费长期历史，本序列自首次抓取起每月自动存档、逐步积累；口径固定为 Siblis")
+    finalize(ind, [(d, v) for d, v in hist])
+    n = len(hist)
+    if ind["percentile_10y"] is None or n < 24:
+        ind["percentile_10y"] = None
+        ind["percentile_basis"] = f"积累中（{n} 个月度点，满 24 个月后启用百分位）"
+        ind["signal"] = {"label": "历史序列积累中（每月自动存档）", "tone": "neutral"}
+    else:
+        ind["signal"] = compute.signal_pe(ind["percentile_10y"])
+    ind["extra"] = {"同期 Trailing PE（Siblis 口径）": s["trailing"],
+                    "口径说明": "S&P 500 信息技术板块 ≈ 半导体前瞻估值的近似替代，非 SOXX 官方口径"}
+    return ind
+
+
 def build_soxx_pe(raw):
     d = raw["DAILY_PE"]["SOXX"]
     asof = d["date"] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -158,6 +225,17 @@ def build_soxx_pe(raw):
         ind["signal"] = {"label": "历史序列积累中（每月自动存档）", "tone": "neutral"}
     else:
         ind["signal"] = compute.signal_pe(ind["percentile_10y"])
+    return ind
+
+
+def build_sp500_pe(raw):
+    hist = raw["SPX_PE_TRAILING_HIST"]
+    ind = base_indicator(
+        "us_sp500_pe", GROUP_VAL, "S&P 500 Trailing PE", "x", 2, "月度",
+        "worldperatio", "https://www.worldperatio.com/index/sp-500/",
+        "月度 trailing PE（单一口径）；百分位=当前值在动态 10 年窗口月度观测中的分位")
+    finalize(ind, hist)
+    ind["signal"] = compute.signal_pe(ind["percentile_10y"])
     return ind
 
 
@@ -347,8 +425,11 @@ def build_cn_house(tier_cn, kind):
 
 
 BUILDERS = [
+    ("us_fear_greed", build_cnn_fear_greed),
     ("us_qqq_pe", build_qqq_pe),
     ("us_qqq_forward_pe", build_qqq_forward_pe),
+    ("us_it_forward_pe", build_it_forward_pe),
+    ("us_sp500_pe", build_sp500_pe),
     ("us_soxx_pe", build_soxx_pe),
     ("us_10y_yield", build_yield),
     ("us_cpi_yoy", build_cpi),
@@ -408,7 +489,7 @@ def main():
     out = {
         "generated_at_utc": now_utc.strftime("%Y-%m-%d %H:%M UTC"),
         "generated_at_et": et.strftime("%Y-%m-%d %H:%M ET"),
-        "group_order": [GROUP_VAL, GROUP_RATE, GROUP_LIQ, GROUP_CN],
+        "group_order": [GROUP_SENTIMENT, GROUP_VAL, GROUP_RATE, GROUP_LIQ, GROUP_CN],
         "indicators": indicators,
     }
     save_json(OUT_FILE, out)

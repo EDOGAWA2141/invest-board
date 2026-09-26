@@ -3,18 +3,27 @@
 from datetime import date, timedelta
 
 
-def percentile(history, current, years=10, min_points=30):
+def percentile(history, current, years=10, min_points=30, asof=None):
     """计算当前值在历史窗口中的百分位。
 
     history: [(date_str, value)] 按日期升序。
+    窗口为 [asof - years, asof]，asof 默认为 workflow 运行当天（UTC），
+    按日历年份动态倒退，不写死任何日期。
     返回 (pct 或 None, 口径说明)。
     """
     if not history or len(history) < 2:
         return None, "数据不足"
-    last_d = date.fromisoformat(history[-1][0])
-    cutoff = (last_d - timedelta(days=365 * years)).isoformat()
+    if asof is None:
+        asof = date.today()  # workflow 运行日期（容器为 UTC）
+    elif isinstance(asof, str):
+        asof = date.fromisoformat(asof)
+    try:
+        cutoff_d = asof.replace(year=asof.year - years)
+    except ValueError:  # 2 月 29 日 -> 2 月 28 日
+        cutoff_d = asof.replace(year=asof.year - years, day=28)
+    cutoff = cutoff_d.isoformat()
     window = [v for d, v in history if d >= cutoff]
-    basis = f"近{years}年"
+    basis = f"近{years}年（{cutoff} 起，动态窗口）"
     if len(window) < min_points:
         window = [v for _, v in history]
         basis = f"全部历史（{len(window)} 个观测点）"
