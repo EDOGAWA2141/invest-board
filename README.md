@@ -8,9 +8,9 @@
 ### 美国 · 估值
 | 指标 | 来源 | 更新频率 | 备注 |
 |---|---|---|---|
-| QQQ / Nasdaq-100 Trailing PE（含 10 年百分位） | worldperatio | 月度 | 口径终身固定为 worldperatio |
+| QQQ / Nasdaq-100 Trailing PE（含 10 年百分位） | Robinhood（日度 headline）＋ worldperatio（月度序列算百分位） | 日度 | 双口径已在卡片注明 |
 | QQQ / Nasdaq-100 Forward PE | Siblis Research | 月度 | 无免费长期历史，自建存档，满 24 个月启用百分位 |
-| SOXX Trailing P/E | iShares 官方 factsheet | 月度 | 官方口径，自建存档 |
+| SOXX Trailing P/E | Robinhood（Zacks 备用） | 日度 | 日度口径，自建月度存档 |
 
 ### 美国 · 利率与通胀
 | 指标 | 来源 | 更新频率 |
@@ -70,7 +70,8 @@ python3 fetch/run_all.py   # 生成 data/indicators.json
 ├── data/
 │   ├── indicators.json        # 每日自动生成的指标数据
 │   ├── _hist_qqq_forward_pe.json  # 自建：forward PE 月度存档
-│   └── _hist_soxx_pe.json         # 自建：SOXX PE 月度存档
+│   ├── _hist_soxx_pe_rh.json        # 自建：SOXX PE 月度存档（Robinhood 口径）
+│   └── _hist_soxx_pe.json           # 作废：旧 iShares 口径存档（保留备查）
 ├── fetch/
 │   ├── fetch_us.py            # 美国指标抓取
 │   ├── fetch_cn.py            # 中国指标抓取（BIS/NBS/东财/统计局解读）
